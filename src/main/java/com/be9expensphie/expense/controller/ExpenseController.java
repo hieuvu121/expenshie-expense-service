@@ -1,10 +1,12 @@
 package com.be9expensphie.expense.controller;
 
+import com.be9expensphie.expense.dto.AiPromptDTO;
 import com.be9expensphie.expense.dto.CursorDTO;
 import com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseRequestDTO;
 import com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseResponseDTO;
 import com.be9expensphie.expense.enums.ExpenseStatus;
 import com.be9expensphie.expense.enums.TimeRange;
+import com.be9expensphie.expense.service.ExpenseAiService;
 import com.be9expensphie.expense.service.ExpenseService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +20,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ExpenseController {
 
+    private final ExpenseAiService expenseAiService;
     private final ExpenseService expenseService;
 
     @PostMapping
@@ -95,10 +98,13 @@ public class ExpenseController {
     }
 
     @PostMapping("/ai")
-    public ResponseEntity<?> createExpenseAI(
+    public ResponseEntity<CreateExpenseResponseDTO> createExpenseAI(
             @PathVariable Long householdId,
+            @RequestBody AiPromptDTO body,
             @RequestHeader("X-User-Id") Long userId
     ) {
-        throw new UnsupportedOperationException("AI expense creation not yet implemented — coming in Phase 7");
+        return ResponseEntity.ok(
+                expenseAiService.createExpenseFromPrompt(householdId, body.getPrompt(), userId)
+        );
     }
 }

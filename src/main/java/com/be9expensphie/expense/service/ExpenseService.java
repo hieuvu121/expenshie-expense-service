@@ -236,7 +236,7 @@ public class ExpenseService {
         }
 
         return expenseRepo.findExpenseInRange(householdId, status, start, end)
-                .stream().map(this::toDTO).toList();
+                .stream().map(this::toDTO).collect(Collectors.toList());
     }
 
     public List<CreateExpenseResponseDTO> getExpenseLastMonth(Long householdId) {

@@ -17,6 +17,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.requestreply.ReplyingKafkaTemplate;
 import org.springframework.kafka.requestreply.RequestReplyFuture;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -35,20 +36,20 @@ public class ExpenseAiService {
     private final HouseholdMemberSummaryRepository householdMemberSummaryRepo;
     private final ObjectMapper objectMapper;
 
-    //send and wait for response and call expense service
     public CreateExpenseResponseDTO createExpenseFromPrompt(Long householdId, String prompt, Long userId) {
-        // look up memberId now — needed to build a valid split for ExpenseValidation
         HouseholdMemberSummary member = householdMemberSummaryRepo
                 .findByUserIdAndHouseholdId(userId, householdId)
                 .orElseThrow(() -> new RuntimeException("User is not in this household"));
 
-        //create producer Record to contain response
         ProducerRecord<String, AiRequestEvent> producerRecord = new ProducerRecord<>(
                 "ai-request-events",
-                AiRequestEvent.builder().householdId(householdId).prompt(prompt).build()
+                AiRequestEvent.builder()
+                        .type(AiRequestType.PARSE_EXPENSE)
+                        .householdId(householdId)
+                        .prompt(prompt)
+                        .build()
         );
 
-        //block mess and wait for response
         RequestReplyFuture<String, AiRequestEvent, AiResponseEvent> future =
                 replyingKafkaTemplate.sendAndReceive(producerRecord);
 
@@ -91,8 +92,12 @@ public class ExpenseAiService {
         }
     }
 
-    public String getExpenseSuggestions(Long householdId){
-        List<CreateExpenseResponseDTO>expenses=expenseService.getExpenseLastMonth(householdId);
+    @Cacheable(key = "#householdId", cacheNames = "ai_suggestion")
+    public String getExpenseSuggestions(Long householdId, Long userId) {
+        householdMemberSummaryRepo.findByUserIdAndHouseholdId(userId, householdId)
+                .orElseThrow(() -> new RuntimeException("User is not in this household"));
+
+        List<CreateExpenseResponseDTO> expenses = expenseService.getExpenseLastMonth(householdId);
         if(expenses.isEmpty()){
             return "No expense created in this household";
         }

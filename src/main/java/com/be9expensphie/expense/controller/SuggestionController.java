@@ -17,6 +17,6 @@ public class SuggestionController {
             @PathVariable Long householdId,
             @RequestHeader("X-User-Id") Long userId
     ) {
-        return ResponseEntity.ok(expenseAiService.getExpenseSuggestions(householdId));
+        return ResponseEntity.ok(expenseAiService.getExpenseSuggestions(householdId, userId));
     }
 }

@@ -15,7 +15,6 @@ import com.be9expensphie.expense.repository.ExpenseRepository;
 import com.be9expensphie.expense.repository.ExpenseSplitDetailsRepository;
 import com.be9expensphie.expense.repository.HouseholdMemberSummaryRepository;
 import com.be9expensphie.expense.validation.ExpenseValidation;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -24,6 +23,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -93,6 +93,9 @@ public class ExpenseService {
         return toDTO(savedExpense);
     }
 
+    // Without this, toDTO()'s per-row findById each opened its own transaction —
+    // one page of 10 cost 10 transaction round-trips. See perf/README.md.
+    @Transactional(readOnly = true)
     public CursorDTO<CreateExpenseResponseDTO> getExpense(Long householdId, ExpenseStatus status, int limit, Long cursor, Long userId) {
         householdMemberSummaryRepo.findByUserIdAndHouseholdId(userId, householdId)
                 .orElseThrow(() -> new RuntimeException("User not in household"));

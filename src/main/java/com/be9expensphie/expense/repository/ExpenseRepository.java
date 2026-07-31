@@ -18,9 +18,6 @@ public interface ExpenseRepository extends JpaRepository<ExpenseEntity, Long> {
                                        @Param("householdId") Long householdId,
                                        Pageable pageable);
 
-    @Query("select distinct e from ExpenseEntity e left join fetch e.splitDetails where e IN :expenses")
-    List<ExpenseEntity> fetchSplitDetails(@Param("expenses") List<ExpenseEntity> expenses);
-
     @Query("select e from ExpenseEntity e where e.householdId = :householdId and e.status = :status and e.id < :cursor order by e.id desc")
     List<ExpenseEntity> findExpenseByStatus(@Param("householdId") Long householdId,
                                            @Param("status") ExpenseStatus status,

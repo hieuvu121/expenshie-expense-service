@@ -104,10 +104,9 @@ public class ExpenseService {
         List<ExpenseEntity> expenses;
 
         if (status == null) {
+            // No join-fetch of splitDetails here: toDTO() maps scalars only, so
+            // the extra query loaded a page of splits that nothing ever read.
             expenses = expenseRepo.findNextExpense(cursor != null ? cursor : Long.MAX_VALUE, householdId, pageable);
-            if (!expenses.isEmpty()) {
-                expenseRepo.fetchSplitDetails(expenses);
-            }
         } else {
             expenses = expenseRepo.findExpenseByStatus(householdId, status, cursor != null ? cursor : Long.MAX_VALUE, pageable);
         }

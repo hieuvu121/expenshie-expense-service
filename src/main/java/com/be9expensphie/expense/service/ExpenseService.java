@@ -118,11 +118,28 @@ public class ExpenseService {
 
         Long nextCursor = expenses.isEmpty() ? null : expenses.get(expenses.size() - 1).getId();
 
+        // Resolve every creator name in one query. Calling toDTO() per row issues
+        // findById() per row; that only looks like a single query when a page
+        // happens to share one creator, which is exactly what the perf seed data
+        // did. With N distinct creators on a page it is N queries.
+        Map<Long, String> creatorNames = creatorNamesFor(expenses);
+
         return CursorDTO.<CreateExpenseResponseDTO>builder()
                 .hasMore(hasMore)
                 .nextCursor(nextCursor)
-                .data(expenses.stream().map(this::toDTO).toList())
+                .data(expenses.stream().map(e -> toDTO(e, creatorNames)).toList())
                 .build();
+    }
+
+    private Map<Long, String> creatorNamesFor(List<ExpenseEntity> expenses) {
+        Set<Long> creatorIds = expenses.stream()
+                .map(ExpenseEntity::getCreatedByMemberId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (creatorIds.isEmpty()) return Map.of();
+        return householdMemberSummaryRepo.findAllById(creatorIds).stream()
+                .collect(Collectors.toMap(HouseholdMemberSummary::getMemberId,
+                                          HouseholdMemberSummary::getFullName));
     }
 
     public CreateExpenseResponseDTO getSingleExpense(Long householdId, Long expenseId, Long userId) {
@@ -251,11 +268,20 @@ public class ExpenseService {
                 .orElseThrow(() -> new RuntimeException("No expense found"));
     }
 
+    /** Single-entity path, for callers that already hold exactly one expense. */
     private CreateExpenseResponseDTO toDTO(ExpenseEntity expense) {
         String createdBy = householdMemberSummaryRepo.findById(expense.getCreatedByMemberId())
                 .map(HouseholdMemberSummary::getFullName)
                 .orElse("Unknown");
+        return build(expense, createdBy);
+    }
 
+    /** Page path — names are pre-resolved in one query by creatorNamesFor(). */
+    private CreateExpenseResponseDTO toDTO(ExpenseEntity expense, Map<Long, String> creatorNames) {
+        return build(expense, creatorNames.getOrDefault(expense.getCreatedByMemberId(), "Unknown"));
+    }
+
+    private CreateExpenseResponseDTO build(ExpenseEntity expense, String createdBy) {
         return CreateExpenseResponseDTO.builder()
                 .id(expense.getId())
                 .amount(expense.getAmount())

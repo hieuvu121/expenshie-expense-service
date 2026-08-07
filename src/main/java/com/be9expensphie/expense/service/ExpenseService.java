@@ -40,6 +40,7 @@ public class ExpenseService {
     private final ExpenseValidation expenseValidation;
     private final CacheManager cacheManager;
     private final ExpenseEventProducer expenseEventProducer;
+    private final HouseholdMembershipCache membershipCache;
 
     private static final String AI_SUGGESTION = "ai_suggestion";
     private static final String EXPENSE_IN_RANGE = "expense_in_range";
@@ -97,8 +98,7 @@ public class ExpenseService {
     // pooled connection. Without it each would acquire its own.
     @Transactional(readOnly = true)
     public CursorDTO<CreateExpenseResponseDTO> getExpense(Long householdId, ExpenseStatus status, int limit, Long cursor, Long userId) {
-        householdMemberSummaryRepo.findByUserIdAndHouseholdId(userId, householdId)
-                .orElseThrow(() -> new RuntimeException("User not in household"));
+        membershipCache.requireMember(userId, householdId);
 
         // No Sort here: the @Query carries its own ORDER BY, and passing one in
         // the Pageable too makes Spring Data append a duplicate sort clause.
@@ -124,8 +124,7 @@ public class ExpenseService {
     }
 
     public CreateExpenseResponseDTO getSingleExpense(Long householdId, Long expenseId, Long userId) {
-        householdMemberSummaryRepo.findByUserIdAndHouseholdId(userId, householdId)
-                .orElseThrow(() -> new RuntimeException("User not in this group"));
+        membershipCache.requireMember(userId, householdId);
 
         ExpenseEntity expense = expenseRepo.findByIdAndHouseholdId(expenseId, householdId)
                 .orElseThrow(() -> new RuntimeException("Expense not found"));

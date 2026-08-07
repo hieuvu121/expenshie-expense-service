@@ -15,6 +15,11 @@ import java.util.List;
     indexes = {
         @Index(name = "idx_created_by_member_id", columnList = "created_by_member_id"),
         @Index(name = "idx_expense_list", columnList = "household_id,status,id"),
+        // The unfiltered cursor page filters (household_id, id) with no status.
+        // idx_expense_list puts status between them, so only its leading column
+        // is usable there and MySQL cannot walk id for the ORDER BY. Irrelevant
+        // at a few hundred rows; a cliff at real volume.
+        @Index(name = "idx_expense_cursor", columnList = "household_id,id"),
         @Index(name = "idx_expense_date_range", columnList = "household_id,status,date"),
         @Index(name = "idx_reviewed_by_member_id", columnList = "reviewed_by_member_id")
     }

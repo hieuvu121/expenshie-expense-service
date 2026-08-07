@@ -26,8 +26,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -212,6 +215,7 @@ public class ExpenseService {
     }
 
     @Cacheable(key = "#householdId + ':' + #status + ':' + #range", cacheNames = EXPENSE_IN_RANGE)
+    @Transactional(readOnly = true)
     public List<CreateExpenseResponseDTO> getExpenseByPeriod(ExpenseStatus status, Long householdId, TimeRange range) {
         LocalDate now = LocalDate.now();
         LocalDate start;
@@ -234,13 +238,48 @@ public class ExpenseService {
                 throw new RuntimeException("Invalid range of time");
         }
 
-        return expenseRepo.findExpenseInRange(householdId, status, start, end)
-                .stream().map(this::toDTO).collect(Collectors.toList());
+        return toDTOs(expenseRepo.findExpenseInRange(householdId, status, start, end));
     }
 
+    @Transactional(readOnly = true)
     public List<CreateExpenseResponseDTO> getExpenseLastMonth(Long householdId) {
-        return expenseRepo.findExpenseInLastMonth(householdId)
-                .stream().map(this::toDTO).toList();
+        return toDTOs(expenseRepo.findExpenseInLastMonth(householdId));
+    }
+
+    /**
+     * Maps a list with every creator name resolved in one query.
+     *
+     * The per-row toDTO() overload issues findById() for each expense. On the
+     * paged endpoint that was a 10-row N+1; here the queries are unpaginated,
+     * so a household with a month of expenses paid one round trip per row —
+     * and, before these methods had a transaction, one transaction per row too.
+     */
+    // MUST return a mutable ArrayList, not Stream.toList() or List.of().
+    //
+    // getExpenseByPeriod is @Cacheable into Redis, and RedisConfig calls
+    // activateDefaultTyping(..., NON_FINAL, ...) — Jackson writes a type id
+    // only for non-final types. ArrayList is non-final and serializes as
+    // ["java.util.ArrayList", [...]]; the immutable classes behind
+    // Stream.toList() and List.of() are final, so they serialize as a bare
+    // [...] with no type id. The write succeeds either way, but the read
+    // fails: GenericJackson2JsonRedisSerializer deserializes to Object and
+    // demands the type id, giving "Unexpected token (START_OBJECT), expected
+    // VALUE_STRING". First call after an eviction works, every cache hit 400s.
+    //
+    // Verified by A/B: switching this to Stream.toList() reproduces it.
+    private List<CreateExpenseResponseDTO> toDTOs(List<ExpenseEntity> expenses) {
+        if (expenses.isEmpty()) return new ArrayList<>();
+        Set<Long> creatorIds = expenses.stream()
+                .map(ExpenseEntity::getCreatedByMemberId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> names = creatorIds.isEmpty()
+                ? Map.of()
+                : householdMemberSummaryRepo.findAllById(creatorIds).stream()
+                        .collect(Collectors.toMap(HouseholdMemberSummary::getMemberId,
+                                                  HouseholdMemberSummary::getFullName));
+        return expenses.stream().map(e -> toDTO(e, names))
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
     public ExpenseEntity findExpense(Long householdId, Long expenseId) {

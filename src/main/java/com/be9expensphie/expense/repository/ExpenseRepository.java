@@ -58,6 +58,21 @@ public interface ExpenseRepository extends JpaRepository<ExpenseEntity, Long> {
 
     Optional<ExpenseEntity> findByIdAndHouseholdId(Long id, Long householdId);
 
+    // Read-only single-expense fetch. Same shape as findPage: the creator name
+    // arrives in the join rather than a second findById, and no entity is
+    // hydrated for a DTO that carries scalars only. The entity-returning
+    // overload above stays for the write paths, which mutate what they load.
+    @Query("""
+           select new com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseResponseDTO(
+               coalesce(m.fullName, 'Unknown'), e.id, e.amount, e.date, e.category,
+               e.description, e.status, e.method, e.currency)
+           from ExpenseEntity e
+           left join HouseholdMemberSummary m on m.memberId = e.createdByMemberId
+           where e.id = :id and e.householdId = :householdId
+           """)
+    Optional<CreateExpenseResponseDTO> findDtoByIdAndHouseholdId(@Param("id") Long id,
+                                                                 @Param("householdId") Long householdId);
+
     @Query("select e from ExpenseEntity e where e.householdId = :householdId and e.status = :status and e.date >= :start and e.date < :end")
     List<ExpenseEntity> findExpenseInRange(@Param("householdId") Long householdId,
                                           @Param("status") ExpenseStatus status,

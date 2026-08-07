@@ -126,13 +126,14 @@ public class ExpenseService {
                 .build();
     }
 
+    // Without a transaction the two statements below each opened and committed
+    // their own, so a single-expense read cost two transactions.
+    @Transactional(readOnly = true)
     public CreateExpenseResponseDTO getSingleExpense(Long householdId, Long expenseId, Long userId) {
         membershipCache.requireMember(userId, householdId);
 
-        ExpenseEntity expense = expenseRepo.findByIdAndHouseholdId(expenseId, householdId)
+        return expenseRepo.findDtoByIdAndHouseholdId(expenseId, householdId)
                 .orElseThrow(() -> new RuntimeException("Expense not found"));
-
-        return toDTO(expense);
     }
 
     @Transactional

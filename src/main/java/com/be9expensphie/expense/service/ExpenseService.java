@@ -21,17 +21,13 @@ import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -93,53 +89,38 @@ public class ExpenseService {
         return toDTO(savedExpense);
     }
 
-    // Without this, toDTO()'s per-row findById each opened its own transaction —
-    // one page of 10 cost 10 transaction round-trips. See perf/README.md.
+    // The page is projected straight into the DTO by the repository, so no
+    // ExpenseEntity is loaded and the creator name comes back in the same
+    // statement — see ExpenseRepository.findPage.
+    //
+    // The transaction stays: it keeps the membership check and the page on one
+    // pooled connection. Without it each would acquire its own.
     @Transactional(readOnly = true)
     public CursorDTO<CreateExpenseResponseDTO> getExpense(Long householdId, ExpenseStatus status, int limit, Long cursor, Long userId) {
         householdMemberSummaryRepo.findByUserIdAndHouseholdId(userId, householdId)
                 .orElseThrow(() -> new RuntimeException("User not in household"));
 
-        Pageable pageable = PageRequest.of(0, limit + 1, Sort.by("id").descending());
-        List<ExpenseEntity> expenses;
+        // No Sort here: the @Query carries its own ORDER BY, and passing one in
+        // the Pageable too makes Spring Data append a duplicate sort clause.
+        Pageable pageable = PageRequest.of(0, limit + 1);
+        long from = cursor != null ? cursor : Long.MAX_VALUE;
 
-        if (status == null) {
-            // No join-fetch of splitDetails here: toDTO() maps scalars only, so
-            // the extra query loaded a page of splits that nothing ever read.
-            expenses = expenseRepo.findNextExpense(cursor != null ? cursor : Long.MAX_VALUE, householdId, pageable);
-        } else {
-            expenses = expenseRepo.findExpenseByStatus(householdId, status, cursor != null ? cursor : Long.MAX_VALUE, pageable);
-        }
+        List<CreateExpenseResponseDTO> rows = (status == null)
+                ? expenseRepo.findPage(householdId, from, pageable)
+                : expenseRepo.findPageByStatus(householdId, status, from, pageable);
 
-        boolean hasMore = expenses.size() > limit;
+        boolean hasMore = rows.size() > limit;
         if (hasMore) {
-            expenses = expenses.subList(0, limit);
+            rows = rows.subList(0, limit);
         }
 
-        Long nextCursor = expenses.isEmpty() ? null : expenses.get(expenses.size() - 1).getId();
-
-        // Resolve every creator name in one query. Calling toDTO() per row issues
-        // findById() per row; that only looks like a single query when a page
-        // happens to share one creator, which is exactly what the perf seed data
-        // did. With N distinct creators on a page it is N queries.
-        Map<Long, String> creatorNames = creatorNamesFor(expenses);
+        Long nextCursor = rows.isEmpty() ? null : rows.get(rows.size() - 1).getId();
 
         return CursorDTO.<CreateExpenseResponseDTO>builder()
                 .hasMore(hasMore)
                 .nextCursor(nextCursor)
-                .data(expenses.stream().map(e -> toDTO(e, creatorNames)).toList())
+                .data(rows)
                 .build();
-    }
-
-    private Map<Long, String> creatorNamesFor(List<ExpenseEntity> expenses) {
-        Set<Long> creatorIds = expenses.stream()
-                .map(ExpenseEntity::getCreatedByMemberId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        if (creatorIds.isEmpty()) return Map.of();
-        return householdMemberSummaryRepo.findAllById(creatorIds).stream()
-                .collect(Collectors.toMap(HouseholdMemberSummary::getMemberId,
-                                          HouseholdMemberSummary::getFullName));
     }
 
     public CreateExpenseResponseDTO getSingleExpense(Long householdId, Long expenseId, Long userId) {

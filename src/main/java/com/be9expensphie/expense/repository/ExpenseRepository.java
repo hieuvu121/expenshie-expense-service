@@ -1,5 +1,6 @@
 package com.be9expensphie.expense.repository;
 
+import com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseResponseDTO;
 import com.be9expensphie.expense.entity.ExpenseEntity;
 import com.be9expensphie.expense.enums.ExpenseStatus;
 import org.springframework.data.domain.Pageable;
@@ -13,16 +14,47 @@ import java.util.Optional;
 
 public interface ExpenseRepository extends JpaRepository<ExpenseEntity, Long> {
 
-    @Query("select e from ExpenseEntity e where e.id < :cursor and e.householdId = :householdId order by e.id desc")
-    List<ExpenseEntity> findNextExpense(@Param("cursor") Long cursor,
-                                       @Param("householdId") Long householdId,
-                                       Pageable pageable);
+    // The list path projects straight into the response DTO instead of loading
+    // ExpenseEntity. Returning entities made Hibernate register each row in the
+    // persistence context, allocate a dirty-check snapshot and a lazy
+    // splitDetails collection wrapper — all discarded immediately, since the
+    // DTO carries scalars only.
+    //
+    // The left join also folds in the creator name, replacing the separate
+    // findAllById() batch. One statement per page instead of two.
+    //
+    // ORDER MATTERS: these constructor expressions bind positionally to
+    // CreateExpenseResponseDTO's @AllArgsConstructor, i.e. field declaration
+    // order (createdBy, id, amount, date, category, description, status,
+    // method, currency). Hibernate validates arity and types at startup, so a
+    // field added or retyped fails fast — but swapping two String fields would
+    // not. Keep this list in sync with the DTO.
+    @Query("""
+           select new com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseResponseDTO(
+               coalesce(m.fullName, 'Unknown'), e.id, e.amount, e.date, e.category,
+               e.description, e.status, e.method, e.currency)
+           from ExpenseEntity e
+           left join HouseholdMemberSummary m on m.memberId = e.createdByMemberId
+           where e.householdId = :householdId and e.id < :cursor
+           order by e.id desc
+           """)
+    List<CreateExpenseResponseDTO> findPage(@Param("householdId") Long householdId,
+                                            @Param("cursor") Long cursor,
+                                            Pageable pageable);
 
-    @Query("select e from ExpenseEntity e where e.householdId = :householdId and e.status = :status and e.id < :cursor order by e.id desc")
-    List<ExpenseEntity> findExpenseByStatus(@Param("householdId") Long householdId,
-                                           @Param("status") ExpenseStatus status,
-                                           @Param("cursor") Long cursor,
-                                           Pageable pageable);
+    @Query("""
+           select new com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseResponseDTO(
+               coalesce(m.fullName, 'Unknown'), e.id, e.amount, e.date, e.category,
+               e.description, e.status, e.method, e.currency)
+           from ExpenseEntity e
+           left join HouseholdMemberSummary m on m.memberId = e.createdByMemberId
+           where e.householdId = :householdId and e.status = :status and e.id < :cursor
+           order by e.id desc
+           """)
+    List<CreateExpenseResponseDTO> findPageByStatus(@Param("householdId") Long householdId,
+                                                    @Param("status") ExpenseStatus status,
+                                                    @Param("cursor") Long cursor,
+                                                    Pageable pageable);
 
     Optional<ExpenseEntity> findByIdAndHouseholdId(Long id, Long householdId);
 

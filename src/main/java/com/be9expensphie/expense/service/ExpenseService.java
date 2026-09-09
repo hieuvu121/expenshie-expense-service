@@ -50,10 +50,10 @@ public class ExpenseService {
 
     @Transactional
     public CreateExpenseResponseDTO createExpense(Long householdId, CreateExpenseRequestDTO createRequest, Long userId) {
-        HouseholdMemberSummary member = householdMemberSummaryRepo.findByUserIdAndHouseholdId(userId, householdId)
+        HouseholdMemberSummary member = householdMemberSummaryRepo.findByUserIdAndHouseholdIdAndRemovedAtIsNull(userId, householdId)
                 .orElseThrow(() -> new RuntimeException("User is not in this household"));
 
-        HouseholdMemberSummary admin = householdMemberSummaryRepo.findByHouseholdIdAndRole(householdId, HouseholdRole.ROLE_ADMIN)
+        HouseholdMemberSummary admin = householdMemberSummaryRepo.findByHouseholdIdAndRoleAndRemovedAtIsNull(householdId, HouseholdRole.ROLE_ADMIN)
                 .orElseThrow(() -> new RuntimeException("No admin found for household"));
 
         expenseValidation.validateExpense(createRequest, householdId);
@@ -316,7 +316,7 @@ public class ExpenseService {
     }
 
     private void checkAdmin(Long householdId, Long userId) {
-        HouseholdMemberSummary member = householdMemberSummaryRepo.findByUserIdAndHouseholdId(userId, householdId)
+        HouseholdMemberSummary member = householdMemberSummaryRepo.findByUserIdAndHouseholdIdAndRemovedAtIsNull(userId, householdId)
                 .orElseThrow(() -> new RuntimeException("Not a member of this household"));
         if (member.getRole() != HouseholdRole.ROLE_ADMIN) {
             throw new RuntimeException("Only admin can perform this action");

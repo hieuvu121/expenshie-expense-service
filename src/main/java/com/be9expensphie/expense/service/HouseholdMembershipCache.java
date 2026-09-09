@@ -24,12 +24,19 @@ import java.time.Duration;
  * shape as the gateway's JWT blacklist cache, which took Redis from ~1178
  * ops/sec to ~1.
  *
- * STALENESS: a positive entry means a user removed from a household keeps read
- * access until it expires. Nothing in this service consumes a member-removed
- * event today, so that window is bounded only by the TTL. Negative entries are
- * invalidated explicitly when MEMBER_JOINED arrives, so a new member is not
- * locked out. Set app.membership-cache-ttl-seconds to 0 to disable and always
- * hit the database.
+ * STALENESS: entries are invalidated explicitly by HouseholdMemberEventConsumer
+ * — negatives on MEMBER_JOINED so a new member is not locked out, positives on
+ * MEMBER_LEFT so a removed one loses access. The underlying lookup filters on
+ * removedAtIsNull, so the database stops answering "member" the moment the
+ * MEMBER_LEFT row is stamped.
+ *
+ * The residual window is per-replica. household-member-events is consumed by
+ * expense-service-group, so exactly one replica clears its map from that
+ * listener; HouseholdMemberCacheInvalidationConsumer exists to fan the same
+ * event out to every replica on a unique group id. If that broadcast listener
+ * is unhealthy, other replicas keep serving a stale positive until the TTL
+ * expires — bounded by app.membership-cache-ttl-seconds, which set to 0
+ * disables the cache and always hits the database.
  */
 @Component
 @RequiredArgsConstructor
@@ -79,6 +86,6 @@ public class HouseholdMembershipCache {
     }
 
     private boolean lookup(Long userId, Long householdId) {
-        return householdMemberSummaryRepo.findByUserIdAndHouseholdId(userId, householdId).isPresent();
+        return householdMemberSummaryRepo.findByUserIdAndHouseholdIdAndRemovedAtIsNull(userId, householdId).isPresent();
     }
 }

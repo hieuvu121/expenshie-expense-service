@@ -38,7 +38,7 @@ public class ExpenseAiService {
 
     public CreateExpenseResponseDTO createExpenseFromPrompt(Long householdId, String prompt, Long userId) {
         HouseholdMemberSummary member = householdMemberSummaryRepo
-                .findByUserIdAndHouseholdId(userId, householdId)
+                .findByUserIdAndHouseholdIdAndRemovedAtIsNull(userId, householdId)
                 .orElseThrow(() -> new RuntimeException("User is not in this household"));
 
         ProducerRecord<String, AiRequestEvent> producerRecord = new ProducerRecord<>(
@@ -94,7 +94,7 @@ public class ExpenseAiService {
 
     @Cacheable(key = "#householdId", cacheNames = "ai_suggestion")
     public String getExpenseSuggestions(Long householdId, Long userId) {
-        householdMemberSummaryRepo.findByUserIdAndHouseholdId(userId, householdId)
+        householdMemberSummaryRepo.findByUserIdAndHouseholdIdAndRemovedAtIsNull(userId, householdId)
                 .orElseThrow(() -> new RuntimeException("User is not in this household"));
 
         List<CreateExpenseResponseDTO> expenses = expenseService.getExpenseLastMonth(householdId);

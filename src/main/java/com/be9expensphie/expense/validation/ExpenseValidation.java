@@ -38,7 +38,8 @@ public class ExpenseValidation {
         }
 
         Set<Long> validMemberIds = new HashSet<>();
-        householdMemberSummaryRepo.findByHouseholdId(householdId)
+        // Filtered: a split may not be assigned to a member who has left.
+        householdMemberSummaryRepo.findByHouseholdIdAndRemovedAtIsNull(householdId)
                 .forEach(m -> validMemberIds.add(m.getMemberId()));
 
         BigDecimal total = BigDecimal.ZERO;

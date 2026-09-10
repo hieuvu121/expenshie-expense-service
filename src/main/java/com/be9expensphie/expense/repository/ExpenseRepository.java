@@ -4,15 +4,14 @@ import com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseResponseDTO;
 import com.be9expensphie.expense.entity.ExpenseEntity;
 import com.be9expensphie.expense.enums.ExpenseStatus;
 import com.be9expensphie.expense.enums.Method;
-import com.be9expensphie.expense.repository.projection.ExpenseRow;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 import java.util.Optional;
 
 public interface ExpenseRepository extends JpaRepository<ExpenseEntity, Long> {
@@ -60,7 +59,7 @@ public interface ExpenseRepository extends JpaRepository<ExpenseEntity, Long> {
            order by e.id desc
            limit :limit
            """, nativeQuery = true)
-    List<ExpenseRow> findPageRows(@Param("householdId") Long householdId,
+    List<Object[]> findPageRows(@Param("householdId") Long householdId,
                                   @Param("cursor") Long cursor,
                                   @Param("limit") int limit);
 
@@ -75,7 +74,7 @@ public interface ExpenseRepository extends JpaRepository<ExpenseEntity, Long> {
            order by e.id desc
            limit :limit
            """, nativeQuery = true)
-    List<ExpenseRow> findPageRowsByStatus(@Param("householdId") Long householdId,
+    List<Object[]> findPageRowsByStatus(@Param("householdId") Long householdId,
                                           @Param("status") String status,
                                           @Param("cursor") Long cursor,
                                           @Param("limit") int limit);
@@ -89,20 +88,34 @@ public interface ExpenseRepository extends JpaRepository<ExpenseEntity, Long> {
         return toDtos(findPageRowsByStatus(householdId, status.name(), cursor, limit));
     }
 
-    private static List<CreateExpenseResponseDTO> toDtos(List<ExpenseRow> rows) {
-        return rows.stream()
-                .map(r -> CreateExpenseResponseDTO.builder()
-                        .createdBy(r.getCreatedBy())
-                        .id(r.getId())
-                        .amount(r.getAmount())
-                        .date(r.getDate())
-                        .category(r.getCategory())
-                        .description(r.getDescription())
-                        .status(ExpenseStatus.valueOf(r.getStatus()))
-                        .method(Method.valueOf(r.getMethod()))
-                        .currency(r.getCurrency())
-                        .build())
-                .collect(Collectors.toCollection(ArrayList::new));
+    /*
+     * Object[] rather than an interface projection. Spring Data backs a
+     * projection interface with a JDK proxy per row and dispatches every getter
+     * through an interceptor: at limit+1 = 11 rows that was 11 proxies and ~99
+     * reflective calls per request, on the service that is already the CPU
+     * constraint. Positional access plus the all-args constructor allocates
+     * neither the proxies nor a builder per row.
+     *
+     * ORDER MATTERS: the indexes below bind to the select list in the two
+     * queries above, which in turn matches CreateExpenseResponseDTO's field
+     * order. Nothing validates this at startup the way a JPQL constructor
+     * expression did, so ExpenseRepositoryMappingTest pins it.
+     */
+    private static List<CreateExpenseResponseDTO> toDtos(List<Object[]> rows) {
+        List<CreateExpenseResponseDTO> out = new ArrayList<>(rows.size());
+        for (Object[] r : rows) {
+            out.add(new CreateExpenseResponseDTO(
+                    (String) r[0],
+                    ((Number) r[1]).longValue(),
+                    (BigDecimal) r[2],
+                    ((java.sql.Date) r[3]).toLocalDate(),
+                    (String) r[4],
+                    (String) r[5],
+                    ExpenseStatus.valueOf((String) r[6]),
+                    Method.valueOf((String) r[7]),
+                    (String) r[8]));
+        }
+        return out;
     }
 
     Optional<ExpenseEntity> findByIdAndHouseholdId(Long id, Long householdId);

@@ -19,8 +19,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -103,14 +101,20 @@ public class ExpenseService {
     public CursorDTO<CreateExpenseResponseDTO> getExpense(Long householdId, ExpenseStatus status, int limit, Long cursor, Long userId) {
         membershipCache.requireMember(userId, householdId);
 
-        // No Sort here: the @Query carries its own ORDER BY, and passing one in
-        // the Pageable too makes Spring Data append a duplicate sort clause.
-        Pageable pageable = PageRequest.of(0, limit + 1);
+        /*
+         * limit + 1 is the has-more probe: fetch one past the page, and if it
+         * comes back there is another page. The extra row is trimmed below.
+         *
+         * No Pageable any more - the queries are native so they can carry a
+         * FORCE INDEX, and they take the limit directly rather than letting
+         * Spring Data append its own LIMIT around the hinted SQL.
+         */
+        int fetch = limit + 1;
         long from = cursor != null ? cursor : Long.MAX_VALUE;
 
         List<CreateExpenseResponseDTO> rows = (status == null)
-                ? expenseRepo.findPage(householdId, from, pageable)
-                : expenseRepo.findPageByStatus(householdId, status, from, pageable);
+                ? expenseRepo.findPage(householdId, from, fetch)
+                : expenseRepo.findPageByStatus(householdId, status, from, fetch);
 
         boolean hasMore = rows.size() > limit;
         if (hasMore) {

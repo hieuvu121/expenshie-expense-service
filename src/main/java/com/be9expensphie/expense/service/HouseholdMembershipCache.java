@@ -30,13 +30,17 @@ import java.time.Duration;
  * removedAtIsNull, so the database stops answering "member" the moment the
  * MEMBER_LEFT row is stamped.
  *
- * The residual window is per-replica. household-member-events is consumed by
- * expense-service-group, so exactly one replica clears its map from that
- * listener; HouseholdMemberCacheInvalidationConsumer exists to fan the same
- * event out to every replica on a unique group id. If that broadcast listener
- * is unhealthy, other replicas keep serving a stale positive until the TTL
- * expires — bounded by app.membership-cache-ttl-seconds, which set to 0
- * disables the cache and always hits the database.
+ * That consumer runs on expense-service-group, so exactly one replica handles
+ * each event. It reaches the others by publishing on Redis after the write,
+ * which MembershipInvalidationListener applies on every replica including the
+ * publisher. Because the publish is post-commit, a replica can no longer
+ * invalidate ahead of the row it is invalidating for — the race the old
+ * second-Kafka-listener design had.
+ *
+ * Redis pub/sub is at-most-once, so a replica that was disconnected keeps
+ * serving a stale positive until the TTL expires — bounded by
+ * app.membership-cache-ttl-seconds, which set to 0 disables the cache and
+ * always hits the database.
  */
 @Component
 @RequiredArgsConstructor

@@ -4,21 +4,30 @@ import com.be9expensphie.common.event.ExpenseEvent;
 import com.be9expensphie.common.event.WebSocketEvent;
 import com.be9expensphie.expense.entity.ExpenseEntity;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+/**
+ * Builds the events a state change produces. Does not send them.
+ *
+ * Sending moved to OutboxPublisher. This class used to call kafkaTemplate.send
+ * from inside the caller's open transaction, so a rollback after that point --
+ * a Redis eviction failing in acceptExpense, say -- left settlement-service
+ * holding settlements for an expense the database still had as PENDING.
+ *
+ * Building stays here, and stays inside the transaction, because
+ * ExpenseEntity.splitDetails is a lazy @OneToMany. Read it after the commit, on
+ * a detached entity, and it throws LazyInitializationException.
+ */
 @Component
 @RequiredArgsConstructor
-@Slf4j
 public class ExpenseEventProducer {
 
-    private final KafkaTemplate<String, ExpenseEvent> expenseEventKafkaTemplate;
-    private final KafkaTemplate<String, WebSocketEvent> webSocketKafkaTemplate;
+    /** Both events a single state change can produce; webSocketEvent may be null. */
+    public record Outgoing(ExpenseEvent expenseEvent, WebSocketEvent webSocketEvent) {}
 
-    public void publish(ExpenseEntity expense, String eventType) {
+    public Outgoing build(ExpenseEntity expense, String eventType) {
         List<ExpenseEvent.SplitDetail> splits = expense.getSplitDetails().stream()
                 .map(s -> ExpenseEvent.SplitDetail.builder()
                         .memberId(s.getMemberId())
@@ -41,20 +50,18 @@ public class ExpenseEventProducer {
                 .eventType(eventType)
                 .build();
 
-        expenseEventKafkaTemplate.send("expense-events", String.valueOf(expense.getHouseholdId()), event);
-        log.info("Published ExpenseEvent: expenseId={}, type={}", expense.getId(), eventType);
-
+        WebSocketEvent wsEvent = null;
         if ("EXPENSE_APPROVED".equals(eventType) || "EXPENSE_REJECTED".equals(eventType)) {
             String wsPayload = "{\"expenseId\":" + expense.getId()
                     + ",\"householdId\":" + expense.getHouseholdId()
                     + ",\"status\":\"" + expense.getStatus().name()
                     + "\",\"eventType\":\"" + eventType + "\"}";
-            WebSocketEvent wsEvent = WebSocketEvent.builder()
+            wsEvent = WebSocketEvent.builder()
                     .destination("/topic/households/" + expense.getHouseholdId() + "/expense")
                     .payload(wsPayload)
                     .build();
-            webSocketKafkaTemplate.send("websocket-events", String.valueOf(expense.getHouseholdId()), wsEvent);
-            log.info("Published WebSocketEvent: expenseId={}, type={}", expense.getId(), eventType);
         }
+
+        return new Outgoing(event, wsEvent);
     }
 }

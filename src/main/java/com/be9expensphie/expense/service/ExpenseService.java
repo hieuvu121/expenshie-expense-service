@@ -10,6 +10,7 @@ import com.be9expensphie.expense.entity.HouseholdMemberSummary;
 import com.be9expensphie.expense.enums.ExpenseStatus;
 import com.be9expensphie.expense.enums.HouseholdRole;
 import com.be9expensphie.expense.enums.TimeRange;
+import com.be9expensphie.expense.outbox.OutboxWriter;
 import com.be9expensphie.expense.producer.ExpenseEventProducer;
 import com.be9expensphie.expense.repository.ExpenseRepository;
 import com.be9expensphie.expense.repository.ExpenseSplitDetailsRepository;
@@ -41,6 +42,7 @@ public class ExpenseService {
     private final ExpenseValidation expenseValidation;
     private final CacheManager cacheManager;
     private final ExpenseEventProducer expenseEventProducer;
+    private final OutboxWriter outbox;
     private final HouseholdMembershipCache membershipCache;
 
     private static final String AI_SUGGESTION = "ai_suggestion";
@@ -84,7 +86,7 @@ public class ExpenseService {
         }
 
         ExpenseEntity savedExpense = expenseRepo.save(expense);
-        expenseEventProducer.publish(savedExpense, "EXPENSE_CREATED");
+        recordEvents(savedExpense, "EXPENSE_CREATED");
 
         evictExpenseInRangeCaches(householdId, status);
         evictCacheForAiSuggestion(householdId);
@@ -97,6 +99,26 @@ public class ExpenseService {
     //
     // The transaction stays: it keeps the membership check and the page on one
     // pooled connection. Without it each would acquire its own.
+    /**
+     * Records the events for a state change in the outbox, inside the caller's
+     * transaction, instead of sending them to Kafka mid-transaction.
+     *
+     * acceptExpense is the case that made this necessary: it published and then
+     * ran three Redis cache evictions, still inside the transaction. Redis
+     * being unreachable rolled the expense back to PENDING while
+     * settlement-service had already consumed EXPENSE_APPROVED and written
+     * settlement rows -- debt for an approval that never happened. Now the
+     * events roll back with it.
+     */
+    private void recordEvents(ExpenseEntity expense, String eventType) {
+        String key = String.valueOf(expense.getHouseholdId());
+        ExpenseEventProducer.Outgoing outgoing = expenseEventProducer.build(expense, eventType);
+        outbox.write("expense-events", key, outgoing.expenseEvent());
+        if (outgoing.webSocketEvent() != null) {
+            outbox.write("websocket-events", key, outgoing.webSocketEvent());
+        }
+    }
+
     @Transactional(readOnly = true)
     public CursorDTO<CreateExpenseResponseDTO> getExpense(Long householdId, ExpenseStatus status, int limit, Long cursor, Long userId) {
         membershipCache.requireMember(userId, householdId);
@@ -191,7 +213,7 @@ public class ExpenseService {
         expense.setStatus(ExpenseStatus.APPROVED);
         expenseRepo.save(expense);
 
-        expenseEventProducer.publish(expense, "EXPENSE_APPROVED");
+        recordEvents(expense, "EXPENSE_APPROVED");
 
         evictCacheForAiSuggestion(householdId);
         evictExpenseInRangeCaches(householdId, ExpenseStatus.PENDING);
@@ -212,7 +234,7 @@ public class ExpenseService {
         expense.setStatus(ExpenseStatus.REJECTED);
         expenseRepo.save(expense);
 
-        expenseEventProducer.publish(expense, "EXPENSE_REJECTED");
+        recordEvents(expense, "EXPENSE_REJECTED");
 
         evictExpenseInRangeCaches(householdId, ExpenseStatus.PENDING);
         evictExpenseInRangeCaches(householdId, ExpenseStatus.REJECTED);

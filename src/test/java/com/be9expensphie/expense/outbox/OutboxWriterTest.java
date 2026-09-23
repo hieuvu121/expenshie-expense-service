@@ -115,6 +115,21 @@ class OutboxWriterTest {
         assertThat(repository.findAll()).isEmpty();
     }
 
+    /*
+     * The bug this whole mechanism turned on: eventId used to be written to the
+     * row and nowhere else, so the payload that reached Kafka carried no id and
+     * consumers could not tell a republish from a new event.
+     */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void theIdOnTheRowIsAlsoInsideThePayload() {
+        new TransactionTemplate(txManager).executeWithoutResult(
+                status -> writer.write("expense-events", "3", event()));
+
+        OutboxEvent row = repository.findAll().get(0);
+        assertThat(row.getPayload()).contains("\"eventId\":\"" + row.getEventId() + "\"");
+    }
+
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void eachEventGetsItsOwnId() {

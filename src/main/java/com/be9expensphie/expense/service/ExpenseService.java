@@ -169,6 +169,24 @@ public class ExpenseService {
         ExpenseEntity expense = expenseRepo.findByIdAndHouseholdId(expenseId, householdId)
                 .orElseThrow(() -> new RuntimeException("Expense not found"));
 
+        /*
+         * Editing an approved expense silently diverged from the settlements
+         * derived from it at approval time. Amount and splits changed here,
+         * settlement_db kept the old figures, and nothing reconciled them --
+         * permanently, since no event was published. Publishing one would not
+         * have helped either: createSettlementsForExpense guards on
+         * existsByExpenseIdAndFromMemberId and would have skipped the
+         * correction, so the dedup guard and the correction were in direct
+         * conflict and the guard won.
+         *
+         * An approved expense is corrected by reversing it and posting a new
+         * one. See ExpenseReversalService.
+         */
+        if (expense.getStatus() != ExpenseStatus.PENDING) {
+            throw new RuntimeException("Only a pending expense can be edited. "
+                    + "Reverse this expense and post a corrected one instead.");
+        }
+
         if (request.getAmount() != null) expense.setAmount(request.getAmount());
         if (request.getMethod() != null) expense.setMethod(request.getMethod());
         if (request.getDate() != null) expense.setDate(request.getDate());

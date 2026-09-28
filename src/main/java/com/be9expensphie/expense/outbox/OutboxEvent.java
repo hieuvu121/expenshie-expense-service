@@ -49,8 +49,19 @@ public class OutboxEvent {
     @Column(name = "event_id", nullable = false, length = 36, unique = true)
     private String eventId;
 
+    /**
+     * MUST carry an explicit length.
+     *
+     * Hibernate's MySQL dialect sizes a CLOB from the column length, and the
+     * default of 255 gave TINYTEXT -- which silently truncated, so registration
+     * 500'd on "Data too long for column 'payload'" the moment an activation
+     * email went through the outbox. H2, which the @DataJpaTest slices run on,
+     * makes an unbounded CLOB either way and never reproduced it.
+     *
+     * Integer.MAX_VALUE selects LONGTEXT.
+     */
     @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, length = Integer.MAX_VALUE)
     private String payload;
 
     @Column(name = "created_at", nullable = false)

@@ -1,6 +1,7 @@
 package com.be9expensphie.expense.outbox;
 
 import com.be9expensphie.common.event.ExpenseEvent;
+import com.be9expensphie.common.event.ExpenseReversalRequested;
 import com.be9expensphie.common.event.WebSocketEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -44,6 +45,7 @@ class OutboxPublisherTest {
 
     private RecordingTemplate<ExpenseEvent> expenseTemplate;
     private RecordingTemplate<WebSocketEvent> webSocketTemplate;
+    private RecordingTemplate<ExpenseReversalRequested> reversalTemplate;
     private OutboxPublisher publisher;
     private ObjectMapper objectMapper;
 
@@ -70,7 +72,9 @@ class OutboxPublisherTest {
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         expenseTemplate = new RecordingTemplate<>();
         webSocketTemplate = new RecordingTemplate<>();
-        publisher = new OutboxPublisher(repository, objectMapper, expenseTemplate, webSocketTemplate);
+        reversalTemplate = new RecordingTemplate<>();
+        publisher = new OutboxPublisher(repository, objectMapper,
+                expenseTemplate, webSocketTemplate, reversalTemplate);
         ReflectionTestUtils.setField(publisher, "retentionDays", 7);
     }
 
@@ -117,6 +121,22 @@ class OutboxPublisherTest {
         assertThat(webSocketTemplate.sent).containsExactly("websocket-events|3");
         assertThat(batch).allSatisfy(r -> assertThat(r.getPublishedAt()).isNotNull());
         verify(repository).saveAll(batch);
+    }
+
+    /* The saga request rides the same outbox, so it needs its own route. */
+    @Test
+    void aReversalRequestGoesToItsOwnTemplate() {
+        OutboxEvent row = row(1, "expense-reversal-requests",
+                ExpenseReversalRequested.builder()
+                        .sagaId("saga-1").householdId(3L).expenseId(42L)
+                        .build());
+        when(repository.findTop100ByPublishedAtIsNullOrderByIdAsc()).thenReturn(List.of(row));
+
+        publisher.drain();
+
+        assertThat(reversalTemplate.sent).containsExactly("expense-reversal-requests|3");
+        assertThat(expenseTemplate.sent).isEmpty();
+        assertThat(row.getPublishedAt()).isNotNull();
     }
 
     @Test

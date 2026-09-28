@@ -39,7 +39,7 @@ public class ExpenseReversal {
     private Long requestedByMemberId;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 32)
+    @Column(nullable = false, columnDefinition = "varchar(32)")
     private ReversalState state;
 
     @Column(name = "requested_at", nullable = false)

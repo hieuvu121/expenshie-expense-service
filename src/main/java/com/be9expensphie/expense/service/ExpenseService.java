@@ -359,7 +359,8 @@ public class ExpenseService {
                 .build();
     }
 
-    private void checkAdmin(Long householdId, Long userId) {
+    /* Package-private so ExpenseReversalService can reuse it. */
+    void checkAdmin(Long householdId, Long userId) {
         HouseholdMemberSummary member = householdMemberSummaryRepo.findByUserIdAndHouseholdIdAndRemovedAtIsNull(userId, householdId)
                 .orElseThrow(() -> new RuntimeException("Not a member of this household"));
         if (member.getRole() != HouseholdRole.ROLE_ADMIN) {

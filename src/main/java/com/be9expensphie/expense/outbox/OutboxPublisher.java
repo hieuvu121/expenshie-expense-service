@@ -1,6 +1,7 @@
 package com.be9expensphie.expense.outbox;
 
 import com.be9expensphie.common.event.ExpenseEvent;
+import com.be9expensphie.common.event.ExpenseReversalRequested;
 import com.be9expensphie.common.event.WebSocketEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +44,7 @@ public class OutboxPublisher {
     private final ObjectMapper objectMapper;
     private final KafkaTemplate<String, ExpenseEvent> expenseEventKafkaTemplate;
     private final KafkaTemplate<String, WebSocketEvent> webSocketKafkaTemplate;
+    private final KafkaTemplate<String, ExpenseReversalRequested> expenseReversalRequestedKafkaTemplate;
 
     @Value("${app.outbox.retention-days:7}")
     private int retentionDays;
@@ -99,6 +101,10 @@ public class OutboxPublisher {
             case "websocket-events" -> webSocketKafkaTemplate
                     .send(row.getTopic(), row.getAggregateId(),
                             objectMapper.readValue(row.getPayload(), WebSocketEvent.class))
+                    .get();
+            case "expense-reversal-requests" -> expenseReversalRequestedKafkaTemplate
+                    .send(row.getTopic(), row.getAggregateId(),
+                            objectMapper.readValue(row.getPayload(), ExpenseReversalRequested.class))
                     .get();
             default -> throw new IllegalStateException("No template for topic " + row.getTopic());
         }

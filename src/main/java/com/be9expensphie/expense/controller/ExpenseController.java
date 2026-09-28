@@ -6,14 +6,18 @@ import com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseRequestDTO;
 import com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseResponseDTO;
 import com.be9expensphie.expense.enums.ExpenseStatus;
 import com.be9expensphie.expense.enums.TimeRange;
+import com.be9expensphie.expense.entity.ExpenseReversal;
 import com.be9expensphie.expense.service.ExpenseAiService;
+import com.be9expensphie.expense.service.ExpenseReversalService;
 import com.be9expensphie.expense.service.ExpenseService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("households/{householdId}/expenses")
@@ -22,6 +26,7 @@ public class ExpenseController {
 
     private final ExpenseAiService expenseAiService;
     private final ExpenseService expenseService;
+    private final ExpenseReversalService expenseReversalService;
 
     @PostMapping
     public ResponseEntity<CreateExpenseResponseDTO> createExpense(
@@ -106,5 +111,38 @@ public class ExpenseController {
         return ResponseEntity.ok(
                 expenseAiService.createExpenseFromPrompt(householdId, body.getPrompt(), userId)
         );
+    }
+
+    /*
+     * 202, not 200. The reversal is in flight, not done. Telling the client
+     * otherwise is exactly what would make the compensation path a lie -- the
+     * admin must never see "reversed" for something settlement-service can
+     * still refuse.
+     */
+    @PostMapping("/{expenseId}/reversal")
+    public ResponseEntity<Map<String, Object>> requestReversal(
+            @PathVariable Long householdId,
+            @PathVariable Long expenseId,
+            @RequestHeader("X-User-Id") Long userId
+    ) {
+        ExpenseReversal reversal = expenseReversalService.requestReversal(householdId, expenseId, userId);
+        return ResponseEntity.accepted().body(Map.of(
+                "sagaId", reversal.getSagaId(),
+                "state", reversal.getState().name()));
+    }
+
+    @GetMapping("/{expenseId}/reversal")
+    public ResponseEntity<Map<String, Object>> reversalStatus(
+            @PathVariable Long householdId,
+            @PathVariable Long expenseId,
+            @RequestHeader("X-User-Id") Long userId
+    ) {
+        ExpenseReversal reversal = expenseReversalService.status(householdId, expenseId, userId);
+        /* HashMap, not Map.of: failureReason is null on the happy path. */
+        Map<String, Object> body = new HashMap<>();
+        body.put("sagaId", reversal.getSagaId());
+        body.put("state", reversal.getState().name());
+        body.put("failureReason", reversal.getFailureReason());
+        return ResponseEntity.ok(body);
     }
 }

@@ -3,6 +3,7 @@ package com.be9expensphie.expense.config;
 import com.be9expensphie.common.event.AiRequestEvent;
 import com.be9expensphie.common.event.AiResponseEvent;
 import com.be9expensphie.common.event.ExpenseEvent;
+import com.be9expensphie.common.event.ExpenseReversalRequested;
 import com.be9expensphie.common.event.WebSocketEvent;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -35,6 +36,12 @@ public class KafkaProducerConfig {
 
     @Bean
     public KafkaTemplate<String, ExpenseEvent> expenseEventKafkaTemplate() {
+        return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(baseProducerProps()));
+    }
+
+    /* The reversal saga's outbound request, drained from the outbox. */
+    @Bean
+    public KafkaTemplate<String, ExpenseReversalRequested> expenseReversalRequestedKafkaTemplate() {
         return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(baseProducerProps()));
     }
 

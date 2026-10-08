@@ -68,6 +68,13 @@ public class KafkaConsumerConfig {
         Map<String, Object> props = new HashMap<>();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "expense-reversal-group");
+        /*
+         * earliest, not the client default of latest. A saga message published
+         * while this consumer was down would otherwise be skipped outright --
+         * which is survivable only because the re-request sweep exists, and
+         * there is no reason to lean on it for an ordinary restart.
+         */
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
         props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.be9expensphie.common.event");

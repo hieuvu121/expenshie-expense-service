@@ -8,7 +8,7 @@ import com.be9expensphie.expense.entity.ExpenseEntity;
 import com.be9expensphie.expense.entity.ExpenseSplitDetailsEntity;
 import com.be9expensphie.expense.entity.HouseholdMemberSummary;
 import com.be9expensphie.expense.enums.ExpenseStatus;
-import com.be9expensphie.expense.enums.HouseholdRole;
+import com.be9expensphie.common.enums.HouseholdRole;
 import com.be9expensphie.expense.enums.TimeRange;
 import com.be9expensphie.expense.outbox.OutboxWriter;
 import com.be9expensphie.expense.producer.ExpenseEventProducer;
@@ -86,7 +86,26 @@ public class ExpenseService {
         }
 
         ExpenseEntity savedExpense = expenseRepo.save(expense);
+
+        /*
+         * An admin's own expense skips PENDING and is APPROVED on the spot, and
+         * it has to say so. settlement-service reacts solely to
+         * EXPENSE_APPROVED, so announcing only EXPENSE_CREATED meant "APPROVED
+         * in expense_db" and "approved as far as settlement-service knows" were
+         * different predicates: an admin's expense produced no debt at all, and
+         * nothing reconciled the two. Every scenario in verify/ has to create
+         * expenses as a member to work around it.
+         *
+         * Both events go out, because they are different facts -- the expense
+         * exists, and it is approved -- and a consumer added later may care
+         * about either. EXPENSE_APPROVED also carries the websocket push that
+         * ExpenseEventProducer builds for approvals, so connected clients see a
+         * born-approved expense the same way they see an approval.
+         */
         recordEvents(savedExpense, "EXPENSE_CREATED");
+        if (status == ExpenseStatus.APPROVED) {
+            recordEvents(savedExpense, "EXPENSE_APPROVED");
+        }
 
         evictExpenseInRangeCaches(householdId, status);
         evictCacheForAiSuggestion(householdId);

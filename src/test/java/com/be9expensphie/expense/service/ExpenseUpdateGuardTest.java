@@ -4,7 +4,7 @@ import com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseRequestDTO;
 import com.be9expensphie.expense.entity.ExpenseEntity;
 import com.be9expensphie.expense.entity.HouseholdMemberSummary;
 import com.be9expensphie.expense.enums.ExpenseStatus;
-import com.be9expensphie.expense.enums.HouseholdRole;
+import com.be9expensphie.common.enums.HouseholdRole;
 import com.be9expensphie.expense.enums.Method;
 import com.be9expensphie.expense.repository.ExpenseRepository;
 import com.be9expensphie.expense.repository.HouseholdMemberSummaryRepository;

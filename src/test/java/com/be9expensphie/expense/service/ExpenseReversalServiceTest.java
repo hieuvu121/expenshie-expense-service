@@ -6,7 +6,7 @@ import com.be9expensphie.expense.entity.ExpenseEntity;
 import com.be9expensphie.expense.entity.ExpenseReversal;
 import com.be9expensphie.expense.entity.HouseholdMemberSummary;
 import com.be9expensphie.expense.enums.ExpenseStatus;
-import com.be9expensphie.expense.enums.HouseholdRole;
+import com.be9expensphie.common.enums.HouseholdRole;
 import com.be9expensphie.expense.enums.Method;
 import com.be9expensphie.expense.enums.ReversalState;
 import com.be9expensphie.expense.outbox.OutboxWriter;

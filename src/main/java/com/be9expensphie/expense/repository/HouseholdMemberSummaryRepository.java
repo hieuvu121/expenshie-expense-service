@@ -1,7 +1,7 @@
 package com.be9expensphie.expense.repository;
 
 import com.be9expensphie.expense.entity.HouseholdMemberSummary;
-import com.be9expensphie.expense.enums.HouseholdRole;
+import com.be9expensphie.common.enums.HouseholdRole;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

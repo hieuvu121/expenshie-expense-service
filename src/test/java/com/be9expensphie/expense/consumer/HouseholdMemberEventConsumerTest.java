@@ -2,7 +2,7 @@ package com.be9expensphie.expense.consumer;
 
 import com.be9expensphie.common.event.HouseholdMemberEvent;
 import com.be9expensphie.expense.entity.HouseholdMemberSummary;
-import com.be9expensphie.expense.enums.HouseholdRole;
+import com.be9expensphie.common.enums.HouseholdRole;
 import com.be9expensphie.expense.repository.HouseholdMemberSummaryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

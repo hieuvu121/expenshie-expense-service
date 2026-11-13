@@ -2,6 +2,7 @@ package com.be9expensphie.expense.entity;
 
 import com.be9expensphie.expense.enums.ExpenseStatus;
 import com.be9expensphie.expense.enums.Method;
+import com.be9expensphie.expense.exception.InvalidExpenseStatusException;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -37,6 +38,15 @@ public class ExpenseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @EqualsAndHashCode.Include
     private Long id;
+
+    /*
+     * NOT NULL DEFAULT 0 so ddl-auto=update backfills existing rows with 0.
+     * A NULL version on a row that already exists makes Hibernate treat the
+     * entity as unsaved, so merge() would try to INSERT it again.
+     */
+    @Version
+    @Column(nullable = false, columnDefinition = "bigint not null default 0")
+    private Long version;
 
     @Column(nullable = false)
     private BigDecimal amount;
@@ -86,4 +96,27 @@ public class ExpenseEntity {
     @OneToMany(mappedBy = "expense", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<ExpenseSplitDetailsEntity> splitDetails = new ArrayList<>();
+
+    public void startReversal(){
+        checkStatus(ExpenseStatus.APPROVED, "start reversal");
+        this.status=ExpenseStatus.REVERSING;
+    }
+
+    public void completeReversal(){
+        checkStatus(ExpenseStatus.REVERSING, "complete reversal");
+        this.status=ExpenseStatus.REVERSED;
+    }
+
+    public void cancelReversal(){
+        checkStatus(ExpenseStatus.REVERSING, "cancel reversal");
+        this.status=ExpenseStatus.APPROVED;
+    }
+
+    private void checkStatus(ExpenseStatus required, String action){
+        if(this.status != required){
+            throw new InvalidExpenseStatusException(String.format(
+                "Cannot %s expense %d: status is %s, expected %s",
+                action, id, status, required));
+        }
+    }
 }

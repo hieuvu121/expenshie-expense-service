@@ -59,9 +59,7 @@ public class ExpenseReversalService {
             return inFlight.get();
         }
 
-        if (expense.getStatus() != ExpenseStatus.APPROVED) {
-            throw new RuntimeException("Only an approved expense can be reversed");
-        }
+        expense.startReversal();
 
         Instant now = Instant.now();
         ExpenseReversal reversal = reversalRepo.save(ExpenseReversal.builder()
@@ -75,7 +73,7 @@ public class ExpenseReversalService {
                 .attempts(1)
                 .build());
 
-        expense.setStatus(ExpenseStatus.REVERSING);
+        expense.startReversal();
         expenseRepo.save(expense);
 
         publishRequest(reversal);
@@ -110,12 +108,12 @@ public class ExpenseReversalService {
                         "Reversal " + reversal.getSagaId() + " references a missing expense"));
 
         if (decision.getOutcome() == ReversalOutcome.ACCEPTED) {
-            expense.setStatus(ExpenseStatus.REVERSED);
+            expense.completeReversal();
             reversal.setState(ReversalState.COMPLETED);
             log.info("Reversal {} completed for expenseId={}", reversal.getSagaId(), expense.getId());
         } else {
             /* THE COMPENSATION. A true inverse: straight back to APPROVED. */
-            expense.setStatus(ExpenseStatus.APPROVED);
+            expense.cancelReversal();
             reversal.setState(ReversalState.CANCELLED);
             reversal.setFailureReason(decision.getReason());
             log.info("Reversal {} refused for expenseId={}: {}",

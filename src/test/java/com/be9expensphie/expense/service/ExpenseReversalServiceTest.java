@@ -15,6 +15,7 @@ import com.be9expensphie.expense.repository.ExpenseRepository;
 import com.be9expensphie.expense.repository.ExpenseReversalRepository;
 import com.be9expensphie.expense.repository.HouseholdMemberSummaryRepository;
 import com.be9expensphie.common.event.DomainEvent;
+import com.be9expensphie.expense.entity.ExpenseFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -79,7 +80,7 @@ class ExpenseReversalServiceTest {
     void setUp() {
         outbox = new RecordingOutbox();
         ExpenseService expenseService = new ExpenseService(
-                expenseRepo, membershipRepo, null, null, null, null, null, null);
+                expenseRepo, membershipRepo, null, null, null, null, null);
         service = new ExpenseReversalService(expenseRepo, reversalRepo, expenseService, outbox);
     }
 
@@ -92,12 +93,7 @@ class ExpenseReversalServiceTest {
     }
 
     private ExpenseEntity expense(ExpenseStatus status) {
-        ExpenseEntity e = ExpenseEntity.builder()
-                .id(EXPENSE_ID).householdId(HOUSEHOLD_ID)
-                .amount(new BigDecimal("100.00")).currency("AUD")
-                .method(Method.EQUAL).date(LocalDate.of(2026, 9, 1))
-                .status(status).createdByMemberId(11L)
-                .build();
+        ExpenseEntity e = ExpenseFixtures.expense(EXPENSE_ID, status);
         when(expenseRepo.findByIdAndHouseholdId(EXPENSE_ID, HOUSEHOLD_ID)).thenReturn(Optional.of(e));
         return e;
     }
@@ -162,8 +158,7 @@ class ExpenseReversalServiceTest {
 
     @Test
     void acceptedCompletesTheReversal() {
-        ExpenseEntity e = ExpenseEntity.builder()
-                .id(EXPENSE_ID).status(ExpenseStatus.REVERSING).build();
+        ExpenseEntity e = ExpenseFixtures.expense(EXPENSE_ID, ExpenseStatus.REVERSING);
         ExpenseReversal saga = reversal(ReversalState.AWAITING_SETTLEMENT);
         when(reversalRepo.findById(SAGA)).thenReturn(Optional.of(saga));
         when(expenseRepo.findById(EXPENSE_ID)).thenReturn(Optional.of(e));
@@ -180,8 +175,7 @@ class ExpenseReversalServiceTest {
     /** The compensation: a true inverse, straight back to APPROVED. */
     @Test
     void refusedPutsTheExpenseBackAndKeepsTheReason() {
-        ExpenseEntity e = ExpenseEntity.builder()
-                .id(EXPENSE_ID).status(ExpenseStatus.REVERSING).build();
+        ExpenseEntity e = ExpenseFixtures.expense(EXPENSE_ID, ExpenseStatus.REVERSING);
         ExpenseReversal saga = reversal(ReversalState.AWAITING_SETTLEMENT);
         when(reversalRepo.findById(SAGA)).thenReturn(Optional.of(saga));
         when(expenseRepo.findById(EXPENSE_ID)).thenReturn(Optional.of(e));
@@ -205,8 +199,7 @@ class ExpenseReversalServiceTest {
      */
     @Test
     void acceptedForAnExpenseNotReversingFailsTheSagaWithTheReason() {
-        ExpenseEntity e = ExpenseEntity.builder()
-                .id(EXPENSE_ID).status(ExpenseStatus.APPROVED).build();
+        ExpenseEntity e = ExpenseFixtures.expense(EXPENSE_ID, ExpenseStatus.APPROVED);
         ExpenseReversal saga = reversal(ReversalState.AWAITING_SETTLEMENT);
         when(reversalRepo.findById(SAGA)).thenReturn(Optional.of(saga));
         when(expenseRepo.findById(EXPENSE_ID)).thenReturn(Optional.of(e));
@@ -224,8 +217,7 @@ class ExpenseReversalServiceTest {
 
     @Test
     void refusedForAnExpenseNotReversingFailsTheSagaWithTheReason() {
-        ExpenseEntity e = ExpenseEntity.builder()
-                .id(EXPENSE_ID).status(ExpenseStatus.REVERSED).build();
+        ExpenseEntity e = ExpenseFixtures.expense(EXPENSE_ID, ExpenseStatus.REVERSED);
         ExpenseReversal saga = reversal(ReversalState.AWAITING_SETTLEMENT);
         when(reversalRepo.findById(SAGA)).thenReturn(Optional.of(saga));
         when(expenseRepo.findById(EXPENSE_ID)).thenReturn(Optional.of(e));

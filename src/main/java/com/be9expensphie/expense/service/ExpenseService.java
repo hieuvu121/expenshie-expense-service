@@ -5,7 +5,6 @@ import com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseRequestDTO;
 import com.be9expensphie.expense.dto.ExpenseDTO.CreateExpenseResponseDTO;
 import com.be9expensphie.expense.dto.SplitDTO.SplitRequestDTO;
 import com.be9expensphie.expense.entity.ExpenseEntity;
-import com.be9expensphie.expense.entity.ExpenseSplitDetailsEntity;
 import com.be9expensphie.expense.entity.HouseholdMemberSummary;
 import com.be9expensphie.expense.enums.ExpenseStatus;
 import com.be9expensphie.common.enums.HouseholdRole;
@@ -13,7 +12,6 @@ import com.be9expensphie.expense.enums.TimeRange;
 import com.be9expensphie.expense.outbox.OutboxWriter;
 import com.be9expensphie.expense.producer.ExpenseEventProducer;
 import com.be9expensphie.expense.repository.ExpenseRepository;
-import com.be9expensphie.expense.repository.ExpenseSplitDetailsRepository;
 import com.be9expensphie.expense.repository.HouseholdMemberSummaryRepository;
 import com.be9expensphie.expense.validation.ExpenseValidation;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +36,6 @@ public class ExpenseService {
 
     private final ExpenseRepository expenseRepo;
     private final HouseholdMemberSummaryRepository householdMemberSummaryRepo;
-    private final ExpenseSplitDetailsRepository expenseSplitDetailsRepo;
     private final ExpenseValidation expenseValidation;
     private final CacheManager cacheManager;
     private final ExpenseEventProducer expenseEventProducer;
@@ -58,32 +55,15 @@ public class ExpenseService {
 
         expenseValidation.validateExpense(createRequest, householdId);
 
-        ExpenseStatus status = (member.getRole() == HouseholdRole.ROLE_ADMIN) ? ExpenseStatus.APPROVED : ExpenseStatus.PENDING;
+        List<ExpenseEntity.Split> splits = createRequest.getSplits() == null
+                ? null : toSplits(createRequest.getSplits());
 
-        ExpenseEntity expense = ExpenseEntity.builder()
-                .amount(createRequest.getAmount())
-                .category(createRequest.getCategory())
-                .description(createRequest.getDescription())
-                .createdByMemberId(member.getMemberId())
-                .reviewedByMemberId(admin.getMemberId())
-                .method(createRequest.getMethod())
-                .status(status)
-                .householdId(householdId)
-                .date(createRequest.getDate())
-                .currency(createRequest.getCurrency())
-                .build();
-
-        List<Long> memberIds = createRequest.getSplits().stream().map(SplitRequestDTO::getMemberId).toList();
-        Map<Long, HouseholdMemberSummary> memberMap = householdMemberSummaryRepo.findAllById(memberIds)
-                .stream().collect(Collectors.toMap(HouseholdMemberSummary::getMemberId, m -> m));
-
-        for (SplitRequestDTO split : createRequest.getSplits()) {
-            expense.getSplitDetails().add(ExpenseSplitDetailsEntity.builder()
-                    .amount(split.getAmount())
-                    .memberId(split.getMemberId())
-                    .expense(expense)
-                    .build());
-        }
+        ExpenseEntity expense = ExpenseEntity.createExpense(
+                householdId, createRequest.getAmount(), createRequest.getCurrency(),
+                createRequest.getDate(), createRequest.getCategory(), createRequest.getDescription(),
+                createRequest.getMethod(), splits,
+                member.getMemberId(), admin.getMemberId(),
+                member.getRole() == HouseholdRole.ROLE_ADMIN);
 
         ExpenseEntity savedExpense = expenseRepo.save(expense);
 
@@ -103,11 +83,11 @@ public class ExpenseService {
          * born-approved expense the same way they see an approval.
          */
         recordEvents(savedExpense, "EXPENSE_CREATED");
-        if (status == ExpenseStatus.APPROVED) {
+        if (savedExpense.getStatus() == ExpenseStatus.APPROVED) {
             recordEvents(savedExpense, "EXPENSE_APPROVED");
         }
 
-        evictExpenseInRangeCaches(householdId, status);
+        evictExpenseInRangeCaches(householdId, savedExpense.getStatus());
         evictCacheForAiSuggestion(householdId);
         return toDTO(savedExpense);
     }
@@ -118,6 +98,13 @@ public class ExpenseService {
     //
     // The transaction stays: it keeps the membership check and the page on one
     // pooled connection. Without it each would acquire its own.
+    /* Null-safe per element: a null split is the aggregate's to reject, with its own message. */
+    private static List<ExpenseEntity.Split> toSplits(List<SplitRequestDTO> splits) {
+        return splits.stream()
+                .map(s -> s == null ? null : new ExpenseEntity.Split(s.getMemberId(), s.getAmount()))
+                .toList();
+    }
+
     /**
      * Records the events for a state change in the outbox, inside the caller's
      * transaction, instead of sending them to Kafka mid-transaction.
@@ -188,50 +175,17 @@ public class ExpenseService {
         ExpenseEntity expense = expenseRepo.findByIdAndHouseholdId(expenseId, householdId)
                 .orElseThrow(() -> new RuntimeException("Expense not found"));
 
-        /*
-         * Editing an approved expense silently diverged from the settlements
-         * derived from it at approval time. Amount and splits changed here,
-         * settlement_db kept the old figures, and nothing reconciled them --
-         * permanently, since no event was published. Publishing one would not
-         * have helped either: createSettlementsForExpense guards on
-         * existsByExpenseIdAndFromMemberId and would have skipped the
-         * correction, so the dedup guard and the correction were in direct
-         * conflict and the guard won.
-         *
-         * An approved expense is corrected by reversing it and posting a new
-         * one. See ExpenseReversalService.
-         */
-        if (expense.getStatus() != ExpenseStatus.PENDING) {
-            throw new RuntimeException("Only a pending expense can be edited. "
-                    + "Reverse this expense and post a corrected one instead.");
-        }
-
-        if (request.getAmount() != null) expense.setAmount(request.getAmount());
-        if (request.getMethod() != null) expense.setMethod(request.getMethod());
-        if (request.getDate() != null) expense.setDate(request.getDate());
-        if (request.getCurrency() != null) expense.setCurrency(request.getCurrency());
-        if (request.getDescription() != null) expense.setDescription(request.getDescription());
-        if (request.getCategory() != null) expense.setCategory(request.getCategory());
-
+        /* Only new splits name members, and only members need the repository. */
         if (request.getSplits() != null && !request.getSplits().isEmpty()) {
-            List<ExpenseSplitDetailsEntity> existingSplits = expenseSplitDetailsRepo.findByExpenseWithMember(expense);
-            Map<Long, ExpenseSplitDetailsEntity> splitMap = existingSplits.stream()
-                    .collect(Collectors.toMap(ExpenseSplitDetailsEntity::getMemberId, s -> s));
-
-            for (SplitRequestDTO splitRequest : request.getSplits()) {
-                ExpenseSplitDetailsEntity split = splitMap.get(splitRequest.getMemberId());
-                if (split == null) {
-                    split = ExpenseSplitDetailsEntity.builder()
-                            .expense(expense)
-                            .memberId(splitRequest.getMemberId())
-                            .amount(splitRequest.getAmount())
-                            .build();
-                    expense.getSplitDetails().add(split);
-                } else {
-                    split.setAmount(splitRequest.getAmount());
-                }
-            }
+            expenseValidation.validateExpense(request, householdId);
         }
+
+        /* An empty split list means "keep the splits", as it did before. */
+        List<ExpenseEntity.Split> splits = request.getSplits() == null || request.getSplits().isEmpty()
+                ? null : toSplits(request.getSplits());
+
+        expense.updateExpense(request.getAmount(), request.getCurrency(), request.getDate(),
+                request.getCategory(), request.getDescription(), request.getMethod(), splits);
 
         ExpenseEntity savedExpense = expenseRepo.save(expense);
         evictCacheForAiSuggestion(householdId);
@@ -243,11 +197,7 @@ public class ExpenseService {
         checkAdmin(householdId, userId);
 
         ExpenseEntity expense = findExpense(householdId, expenseId);
-        if (expense.getStatus() != ExpenseStatus.PENDING) {
-            throw new RuntimeException("Only pending expense can be approved");
-        }
-
-        expense.setStatus(ExpenseStatus.APPROVED);
+        expense.approve();
         expenseRepo.save(expense);
 
         recordEvents(expense, "EXPENSE_APPROVED");
@@ -264,11 +214,7 @@ public class ExpenseService {
         checkAdmin(householdId, userId);
 
         ExpenseEntity expense = findExpense(householdId, expenseId);
-        if (expense.getStatus() != ExpenseStatus.PENDING) {
-            throw new RuntimeException("Only pending expense can be rejected");
-        }
-
-        expense.setStatus(ExpenseStatus.REJECTED);
+        expense.reject();
         expenseRepo.save(expense);
 
         recordEvents(expense, "EXPENSE_REJECTED");

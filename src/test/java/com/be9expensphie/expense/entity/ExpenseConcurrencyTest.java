@@ -64,17 +64,7 @@ class ExpenseConcurrencyTest {
     }
 
     private Long anApprovedExpense() {
-        return inTx(() -> expenseRepo.save(ExpenseEntity.builder()
-                .amount(new BigDecimal("100.00"))
-                .currency("AUD")
-                .date(LocalDate.of(2026, 9, 1))
-                .category("Food")
-                .method(Method.EQUAL)
-                .status(ExpenseStatus.APPROVED)
-                .createdByMemberId(11L)
-                .reviewedByMemberId(11L)
-                .householdId(3L)
-                .build()).getId());
+        return inTx(() -> expenseRepo.save(ExpenseFixtures.expense(null, ExpenseStatus.APPROVED)).getId());
     }
 
     private ExpenseStatus statusOf(Long id) {

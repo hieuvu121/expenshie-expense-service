@@ -5,8 +5,8 @@ import com.be9expensphie.common.event.ExpenseReversalRequested;
 import com.be9expensphie.common.event.ReversalOutcome;
 import com.be9expensphie.expense.entity.ExpenseEntity;
 import com.be9expensphie.expense.entity.ExpenseReversal;
-import com.be9expensphie.expense.enums.ExpenseStatus;
 import com.be9expensphie.expense.enums.ReversalState;
+import com.be9expensphie.expense.exception.InvalidExpenseStatusException;
 import com.be9expensphie.expense.outbox.OutboxWriter;
 import com.be9expensphie.expense.repository.ExpenseRepository;
 import com.be9expensphie.expense.repository.ExpenseReversalRepository;
@@ -59,9 +59,7 @@ public class ExpenseReversalService {
             return inFlight.get();
         }
 
-        if (expense.getStatus() != ExpenseStatus.APPROVED) {
-            throw new RuntimeException("Only an approved expense can be reversed");
-        }
+        expense.startReversal();
 
         Instant now = Instant.now();
         ExpenseReversal reversal = reversalRepo.save(ExpenseReversal.builder()
@@ -75,7 +73,6 @@ public class ExpenseReversalService {
                 .attempts(1)
                 .build());
 
-        expense.setStatus(ExpenseStatus.REVERSING);
         expenseRepo.save(expense);
 
         publishRequest(reversal);
@@ -110,16 +107,36 @@ public class ExpenseReversalService {
                         "Reversal " + reversal.getSagaId() + " references a missing expense"));
 
         if (decision.getOutcome() == ReversalOutcome.ACCEPTED) {
-            expense.setStatus(ExpenseStatus.REVERSED);
-            reversal.setState(ReversalState.COMPLETED);
-            log.info("Reversal {} completed for expenseId={}", reversal.getSagaId(), expense.getId());
+            try{
+                expense.completeReversal();
+                reversal.complete();
+                log.info("Reversal {} completed for expenseId={}", reversal.getSagaId(), expense.getId());
+            }catch (InvalidExpenseStatusException e) {
+                log.error("Reversal {} could not complete for expenseId={}",
+                        reversal.getSagaId(), expense.getId(), e);
+                /*
+                 * The debts are already gone on the settlement side, so whoever
+                 * picks this up must know that before touching the expense.
+                 */
+                reversal.markFailed(String.format(
+                        "Settlement ACCEPTED, settlements %s already voided, but %s",
+                        decision.getSettlementIds(), e.getMessage()));
+            }
         } else {
             /* THE COMPENSATION. A true inverse: straight back to APPROVED. */
-            expense.setStatus(ExpenseStatus.APPROVED);
-            reversal.setState(ReversalState.CANCELLED);
-            reversal.setFailureReason(decision.getReason());
-            log.info("Reversal {} refused for expenseId={}: {}",
-                    reversal.getSagaId(), expense.getId(), decision.getReason());
+            try {
+                expense.cancelReversal();
+                reversal.cancel(decision.getReason());
+                log.info("Reversal {} refused for expenseId={}: {}",
+                        reversal.getSagaId(), expense.getId(), decision.getReason());
+            }catch(InvalidExpenseStatusException e){
+                log.error("Reversal {} could not cancel for expenseId={}",
+                        reversal.getSagaId(), expense.getId(), e);
+                /* Keep settlement's own refusal; it is the reason nothing was voided. */
+                reversal.markFailed(String.format(
+                        "Settlement REFUSED (%s), but %s",
+                        decision.getReason(), e.getMessage()));
+            }
         }
 
         expenseRepo.save(expense);

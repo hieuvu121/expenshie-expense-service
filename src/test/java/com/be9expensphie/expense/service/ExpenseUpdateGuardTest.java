@@ -8,6 +8,8 @@ import com.be9expensphie.common.enums.HouseholdRole;
 import com.be9expensphie.expense.enums.Method;
 import com.be9expensphie.expense.repository.ExpenseRepository;
 import com.be9expensphie.expense.repository.HouseholdMemberSummaryRepository;
+import com.be9expensphie.expense.exception.InvalidExpenseStatusException;
+import com.be9expensphie.expense.entity.ExpenseFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -52,7 +54,7 @@ class ExpenseUpdateGuardTest {
     void setUp() {
         /* Only the two collaborators updateExpense reaches before the guard. */
         service = new ExpenseService(expenseRepo, householdMemberSummaryRepo,
-                null, null, null, null, null, null);
+                null, null, null, null, null);
 
         when(householdMemberSummaryRepo.findByUserIdAndHouseholdIdAndRemovedAtIsNull(USER_ID, HOUSEHOLD_ID))
                 .thenReturn(Optional.of(HouseholdMemberSummary.builder()
@@ -66,16 +68,7 @@ class ExpenseUpdateGuardTest {
 
     private void expenseIs(ExpenseStatus status) {
         when(expenseRepo.findByIdAndHouseholdId(EXPENSE_ID, HOUSEHOLD_ID))
-                .thenReturn(Optional.of(ExpenseEntity.builder()
-                        .id(EXPENSE_ID)
-                        .householdId(HOUSEHOLD_ID)
-                        .amount(new BigDecimal("100.00"))
-                        .currency("AUD")
-                        .method(Method.EQUAL)
-                        .date(LocalDate.of(2026, 9, 1))
-                        .status(status)
-                        .createdByMemberId(11L)
-                        .build()));
+                .thenReturn(Optional.of(ExpenseFixtures.expense(EXPENSE_ID, status)));
     }
 
     private static CreateExpenseRequestDTO amountChange() {
@@ -87,7 +80,7 @@ class ExpenseUpdateGuardTest {
         expenseIs(ExpenseStatus.APPROVED);
 
         assertThatThrownBy(() -> service.updateExpense(HOUSEHOLD_ID, EXPENSE_ID, amountChange(), USER_ID))
-                .hasMessageContaining("Only a pending expense can be edited");
+                .isInstanceOf(InvalidExpenseStatusException.class);
 
         verify(expenseRepo, never()).save(any());
     }
@@ -97,7 +90,7 @@ class ExpenseUpdateGuardTest {
         expenseIs(ExpenseStatus.REJECTED);
 
         assertThatThrownBy(() -> service.updateExpense(HOUSEHOLD_ID, EXPENSE_ID, amountChange(), USER_ID))
-                .hasMessageContaining("Only a pending expense can be edited");
+                .isInstanceOf(InvalidExpenseStatusException.class);
 
         verify(expenseRepo, never()).save(any());
     }

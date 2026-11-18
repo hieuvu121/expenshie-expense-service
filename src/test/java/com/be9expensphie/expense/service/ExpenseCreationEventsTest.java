@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.cache.CacheManager;
@@ -94,7 +95,7 @@ class ExpenseCreationEventsTest {
     @BeforeEach
     void setUp() {
         outbox = new RecordingOutbox();
-        service = new ExpenseService(expenseRepo, membershipRepo, null,
+        service = new ExpenseService(expenseRepo, membershipRepo,
                 new PassThroughValidation(), cacheManager, new ExpenseEventProducer(),
                 outbox, null);
 
@@ -106,10 +107,14 @@ class ExpenseCreationEventsTest {
                 .thenReturn(Optional.of(member(PLAIN_MEMBER, PLAIN_USER, HouseholdRole.ROLE_MEMBER)));
         when(membershipRepo.findAllById(any())).thenReturn(List.of());
 
-        // The entity is returned as-is, with an id, so recordEvents sees it.
+        /*
+         * The entity is returned as-is, with an id, so recordEvents sees it.
+         * Reflection stands in for the database generating it: the entity has
+         * no setters.
+         */
         when(expenseRepo.save(any(ExpenseEntity.class))).thenAnswer(inv -> {
             ExpenseEntity e = inv.getArgument(0);
-            e.setId(42L);
+            ReflectionTestUtils.setField(e, "id", 42L);
             return e;
         });
     }

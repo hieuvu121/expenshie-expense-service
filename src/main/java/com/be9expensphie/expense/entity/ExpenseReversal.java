@@ -1,6 +1,7 @@
 package com.be9expensphie.expense.entity;
 
 import com.be9expensphie.expense.enums.ReversalState;
+import com.be9expensphie.expense.exception.InvalidExpenseStatusException;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -53,4 +54,18 @@ public class ExpenseReversal {
 
     @Column(name = "failure_reason", length = 500)
     private String failureReason;
+
+    public void markFailed(String reason){
+        checkState(ReversalState.AWAITING_SETTLEMENT, "mark failed");
+        this.state=ReversalState.FAILED;
+        this.failureReason=reason;
+    }
+
+    private void checkState(ReversalState required, String action){
+        if(this.state != required){
+            throw new InvalidExpenseStatusException(String.format(
+                    "Cannot %s saga %s: state is %s, expected %s",
+                    action, sagaId, state, required));
+        }
+    }
 }

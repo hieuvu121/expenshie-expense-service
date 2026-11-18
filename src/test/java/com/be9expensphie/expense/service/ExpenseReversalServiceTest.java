@@ -9,6 +9,7 @@ import com.be9expensphie.expense.enums.ExpenseStatus;
 import com.be9expensphie.common.enums.HouseholdRole;
 import com.be9expensphie.expense.enums.Method;
 import com.be9expensphie.expense.enums.ReversalState;
+import com.be9expensphie.expense.exception.InvalidExpenseStatusException;
 import com.be9expensphie.expense.outbox.OutboxWriter;
 import com.be9expensphie.expense.repository.ExpenseRepository;
 import com.be9expensphie.expense.repository.ExpenseReversalRepository;
@@ -135,7 +136,7 @@ class ExpenseReversalServiceTest {
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.requestReversal(HOUSEHOLD_ID, EXPENSE_ID, USER_ID))
-                .hasMessageContaining("Only an approved expense");
+                .isInstanceOf(InvalidExpenseStatusException.class);
 
         assertThat(outbox.written).isEmpty();
     }
@@ -195,6 +196,50 @@ class ExpenseReversalServiceTest {
         assertThat(e.getStatus()).isEqualTo(ExpenseStatus.APPROVED);
         assertThat(saga.getState()).isEqualTo(ReversalState.CANCELLED);
         assertThat(saga.getFailureReason()).contains("already been settled");
+    }
+
+    /*
+     * Settlement-service accepted, but the expense is no longer REVERSING.
+     * Retrying cannot fix that, so the saga is closed as FAILED with the
+     * aggregate's own explanation rather than thrown back at the consumer.
+     */
+    @Test
+    void acceptedForAnExpenseNotReversingFailsTheSagaWithTheReason() {
+        ExpenseEntity e = ExpenseEntity.builder()
+                .id(EXPENSE_ID).status(ExpenseStatus.APPROVED).build();
+        ExpenseReversal saga = reversal(ReversalState.AWAITING_SETTLEMENT);
+        when(reversalRepo.findById(SAGA)).thenReturn(Optional.of(saga));
+        when(expenseRepo.findById(EXPENSE_ID)).thenReturn(Optional.of(e));
+
+        service.onDecided(ExpenseReversalDecided.builder()
+                .sagaId(SAGA).expenseId(EXPENSE_ID)
+                .outcome(ReversalOutcome.ACCEPTED).settlementIds(List.of(7L))
+                .build());
+
+        assertThat(e.getStatus()).isEqualTo(ExpenseStatus.APPROVED);
+        assertThat(saga.getState()).isEqualTo(ReversalState.FAILED);
+        assertThat(saga.getFailureReason())
+                .contains("ACCEPTED", "[7]", "expected REVERSING");
+    }
+
+    @Test
+    void refusedForAnExpenseNotReversingFailsTheSagaWithTheReason() {
+        ExpenseEntity e = ExpenseEntity.builder()
+                .id(EXPENSE_ID).status(ExpenseStatus.REVERSED).build();
+        ExpenseReversal saga = reversal(ReversalState.AWAITING_SETTLEMENT);
+        when(reversalRepo.findById(SAGA)).thenReturn(Optional.of(saga));
+        when(expenseRepo.findById(EXPENSE_ID)).thenReturn(Optional.of(e));
+
+        service.onDecided(ExpenseReversalDecided.builder()
+                .sagaId(SAGA).expenseId(EXPENSE_ID)
+                .outcome(ReversalOutcome.REFUSED).reason("already settled")
+                .settlementIds(List.of(9L))
+                .build());
+
+        assertThat(e.getStatus()).isEqualTo(ExpenseStatus.REVERSED);
+        assertThat(saga.getState()).isEqualTo(ReversalState.FAILED);
+        assertThat(saga.getFailureReason())
+                .contains("REFUSED", "already settled", "expected REVERSING");
     }
 
     /*

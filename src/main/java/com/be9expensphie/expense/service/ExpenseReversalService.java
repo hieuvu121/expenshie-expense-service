@@ -109,7 +109,7 @@ public class ExpenseReversalService {
         if (decision.getOutcome() == ReversalOutcome.ACCEPTED) {
             try{
                 expense.completeReversal();
-                reversal.setState(ReversalState.COMPLETED);
+                reversal.complete();
                 log.info("Reversal {} completed for expenseId={}", reversal.getSagaId(), expense.getId());
             }catch (InvalidExpenseStatusException e) {
                 log.error("Reversal {} could not complete for expenseId={}",
@@ -126,8 +126,7 @@ public class ExpenseReversalService {
             /* THE COMPENSATION. A true inverse: straight back to APPROVED. */
             try {
                 expense.cancelReversal();
-                reversal.setState(ReversalState.CANCELLED);
-                reversal.setFailureReason(decision.getReason());
+                reversal.cancel(decision.getReason());
                 log.info("Reversal {} refused for expenseId={}: {}",
                         reversal.getSagaId(), expense.getId(), decision.getReason());
             }catch(InvalidExpenseStatusException e){

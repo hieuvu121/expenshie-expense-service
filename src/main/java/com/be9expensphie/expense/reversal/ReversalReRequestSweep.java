@@ -63,8 +63,7 @@ public class ReversalReRequestSweep {
                         reversal.getSagaId(), reversal.getExpenseId(), reversal.getAttempts());
                 continue;
             }
-            reversal.setAttempts(reversal.getAttempts() + 1);
-            reversal.setLastRequestedAt(Instant.now());
+            reversal.recordReRequest(Instant.now());
             reversalRepo.save(reversal);
             reversalService.publishRequest(reversal);
             log.warn("Re-requesting reversal {} (attempt {})", reversal.getSagaId(), reversal.getAttempts());

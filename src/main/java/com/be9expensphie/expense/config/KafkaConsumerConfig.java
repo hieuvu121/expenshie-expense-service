@@ -30,7 +30,7 @@ public class KafkaConsumerConfig {
 
     @Bean
     //2 error: optimisticLock should continue retry but InvalidExpenseStatus should stop
-    public DefaultErrorHandler expenseReversalDicidedErrorHandler(){
+    public DefaultErrorHandler expenseReversalDecidedErrorHandler(){
         var backOff = new ExponentialBackOffWithMaxRetries(5);
         backOff.setInitialInterval(200);
         backOff.setMultiplier(2.0);
@@ -108,6 +108,7 @@ public class KafkaConsumerConfig {
             expenseReversalDecidedKafkaListenerContainerFactory() {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, ExpenseReversalDecided>();
         factory.setConsumerFactory(expenseReversalDecidedConsumerFactory());
+        factory.setCommonErrorHandler(expenseReversalDecidedErrorHandler());
         return factory;
     }
 }

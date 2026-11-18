@@ -3,6 +3,8 @@ package com.be9expensphie.expense.config;
 import com.be9expensphie.common.event.AiResponseEvent;
 import com.be9expensphie.common.event.ExpenseReversalDecided;
 import com.be9expensphie.common.event.HouseholdMemberEvent;
+import com.be9expensphie.expense.exception.InvalidExpenseStatusException;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,16 +14,35 @@ import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.KafkaMessageListenerContainer;
+import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 
 import java.util.HashMap;
 import java.util.Map;
 
+@Slf4j
 @Configuration
 public class KafkaConsumerConfig {
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
+
+    @Bean
+    //2 error: optimisticLock should continue retry but InvalidExpenseStatus should stop
+    public DefaultErrorHandler expenseReversalDicidedErrorHandler(){
+        var backOff = new ExponentialBackOffWithMaxRetries(5);
+        backOff.setInitialInterval(200);
+        backOff.setMultiplier(2.0);
+        backOff.setMaxInterval(5_000);
+
+        var handler = new DefaultErrorHandler(
+                (record, ex) -> log.error("Giving up on reversal reply key={} offset={}",
+                        record.key(), record.offset(), ex),
+                backOff);
+        handler.addNotRetryableExceptions(InvalidExpenseStatusException.class);
+        return handler;
+    }
 
     @Bean
     public ConsumerFactory<String, HouseholdMemberEvent> householdMemberEventConsumerFactory() {
